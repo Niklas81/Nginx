@@ -498,6 +498,11 @@ void ngx_http_as_utils_get_hosts(char *arg, ngx_http_as_hosts *hosts)
 	}
 }
 
+
+/*This function extracts the value of a field from the arguments provided
+   in the url and puts it in the value[] and also returns true if 
+   the value is string based on whether there is "" in the value
+*/
 bool ngx_http_as_utils_get_parsed_url_arguement(ngx_str_t url, char* arg, char value[])
 {
 	char temp2[1000], temp3[1000];
@@ -543,9 +548,9 @@ bool ngx_http_as_utils_get_parsed_url_arguement(ngx_str_t url, char* arg, char v
 		if(flag && (strcmp(temp2,"bin")!=0 && strcmp(temp2,"value")!=0))
 		{
 			is_str = (temp3[0]=='%')?true:false;
-
+			//replace " i.e %22 with empty string
 			ngx_http_as_utils_replace(temp3, "%22", "");
-			//temp = strtok(temp3, "\"");
+			
 			strcpy(value, temp3);
 		
 		}
@@ -555,6 +560,16 @@ bool ngx_http_as_utils_get_parsed_url_arguement(ngx_str_t url, char* arg, char v
 
 	return is_str;
 }
+
+/* This function handles the put request. This fun. requires arguments url
+from which it extracts everything like ns, set, key, bins, values. If multiple
+bins and values is present then it checks if no. of bins and values are same or
+not else return error. If multiple values are present then it uses structure binvalue
+to combine bin-value pair for easy of access later. It then associate these with the 
+key and calls "aerospike_put()".
+
+*/
+
 
 void ngx_http_as_utils_put(ngx_str_t url, aerospike *as, char response[])
 {
@@ -568,7 +583,7 @@ void ngx_http_as_utils_put(ngx_str_t url, aerospike *as, char response[])
 		return;
 	}
 	int i,countbin=0,countval=0;
-	
+	//extracts fields value from url
 	char key[1000], namespace[40], set[100], bin[(int)url.len], value[(int)url.len];
 	ngx_http_as_utils_get_parsed_url_arguement(url, "ns", namespace);
 	ngx_http_as_utils_get_parsed_url_arguement(url, "set", set);
@@ -576,6 +591,7 @@ void ngx_http_as_utils_put(ngx_str_t url, aerospike *as, char response[])
 	ngx_http_as_utils_get_parsed_url_arguement(url, "bin", bin);
 	ngx_http_as_utils_get_parsed_url_arguement(url, "value", value);
 	int len = strlen(bin);
+	//count no. of bins and values
 	for(i=0;i<len;i++)
 	{
     	if((int)bin[i]==',')
@@ -587,6 +603,7 @@ void ngx_http_as_utils_put(ngx_str_t url, aerospike *as, char response[])
 		if((int)value[i]==',')
 			countval++;
 	}
+	//if not same then return error
 	if(countbin!=countval)
 	{
 		//char response[129000] = "\0";
@@ -599,6 +616,8 @@ void ngx_http_as_utils_put(ngx_str_t url, aerospike *as, char response[])
 	}
     
 	ngx_http_binvalue binvalue[countbin+1];
+	//put bin and value in the structure ngx_http_binvalue
+	//for doing this it calls the below function
 	ngx_http_as_utils_get_bin_value_pair(bin,value,binvalue,countbin+1);
 
 	as_key put_key;
@@ -623,6 +642,7 @@ void ngx_http_as_utils_put(ngx_str_t url, aerospike *as, char response[])
 	}
 
 	as_error err;
+	//calls aerospike_key_put and generate response based on the output of put
 	if(aerospike_key_put(as, &err, NULL, &put_key, &rec)!=AEROSPIKE_OK)
 	{
 		strncat(response, "{\n", strlen("{\n"));
@@ -637,6 +657,14 @@ void ngx_http_as_utils_put(ngx_str_t url, aerospike *as, char response[])
 	}
 }
 
+/* This function handels the get request. It gets the ns, set and key
+  from the url and then calls the aerospike_key_get().If error comes then
+  it is send back as json containing the error msg. If there is not error
+  then the response will contain the bins and values along with metadata 
+  like TTL, generation etc. Mostly everything that is there in the record
+  structure.
+*/
+
 void ngx_http_as_operate_get(ngx_str_t url, aerospike *as, char response[])
 {
 	as_error err_res;
@@ -650,11 +678,12 @@ void ngx_http_as_operate_get(ngx_str_t url, aerospike *as, char response[])
 	}
 
 	char key[1000], namespace[40], set[100];
-
+	//parses the arguments
 	ngx_http_as_utils_get_parsed_url_arguement(url, "ns", namespace);
 	ngx_http_as_utils_get_parsed_url_arguement(url, "set", set);
 	ngx_http_as_utils_get_parsed_url_arguement(url, "key", key);
 
+	//initialize the key
 	as_key get_key;
 	as_key_init_str(&get_key, namespace, set, key);
 
@@ -671,11 +700,17 @@ void ngx_http_as_operate_get(ngx_str_t url, aerospike *as, char response[])
 	}
 	else
 	{
+		//generate the response message containing everything described abve.
 		ngx_http_as_utils_dump_error(err, response, ",");
 		ngx_http_as_utils_dump_record(p_rec, err, response);
 	}
 }
 
+/* This function handels the delete request. It gets the ns, set and key
+  from the url and then calls the aerospike_key_remove().If error comes then
+  it is send back as json containing the error msg. If there is not error
+  then the response will contain Aerospike_ok msg.
+*/
 void ngx_http_as_operate_del(ngx_str_t url, aerospike *as, char response[])
 {
 	as_error err_res;
@@ -696,12 +731,6 @@ void ngx_http_as_operate_del(ngx_str_t url, aerospike *as, char response[])
 
 	as_key del_key;
 	as_key_init_str(&del_key, namespace, set, key);
-	ngx_write_stderr(namespace);
-	ngx_write_stderr("\n");
-	ngx_write_stderr(set);
-	ngx_write_stderr("\n");
-	ngx_write_stderr(key);
-	ngx_write_stderr("\n");
 	// Starting the json formatted string.
 	strncat(response, "{\n", strlen("{\n"));
 
@@ -713,7 +742,7 @@ void ngx_http_as_operate_del(ngx_str_t url, aerospike *as, char response[])
 	ngx_http_as_utils_dump_error(err, response, "");
 }
 
-
+//Util function to replace to replace a character with a another char inplace
 void ngx_http_as_utils_replace(char * o_string, char * s_string, char * r_string)
 {
       //a buffer variable to do all replace things
@@ -741,8 +770,17 @@ void ngx_http_as_utils_replace(char * o_string, char * s_string, char * r_string
       return ngx_http_as_utils_replace(o_string, s_string, r_string);
  }
 
+/*This function check if the current hosts to whick client is connected is same as the new 
+  one provided in the url. If they are same the we need not connect-an optimization
+  returns true if same or false. Based on true or false we decide whethere we need to 
+  connect again or not*/
+
  bool ngx_http_as_utils_compare_prev_new_hosts(ngx_http_as_hosts current_hosts, ngx_http_as_hosts hosts)
 {
+
+	/*
+		current hosts ip:port pair is present in current_hosts and new ip:port is present in hosts
+	*/
 	if(current_hosts.n < hosts.n || current_hosts.n > hosts.n)
 		return false;
 	int i,j;
@@ -757,6 +795,7 @@ void ngx_http_as_utils_replace(char * o_string, char * s_string, char * r_string
 					flag = true;
 			}
 		}
+		//even if we find one ip:port which is not there in prev host then break and return false.
 		if(!flag)
 			break;
 	}
@@ -767,11 +806,18 @@ void ngx_http_as_utils_replace(char * o_string, char * s_string, char * r_string
 
 }
 
+/*
+	Main job of this function is to extract the bin-value from the url 
+	and put them in ngx_http_binvalue structure
+
+*/
+
 void ngx_http_as_utils_get_bin_value_pair(char b[], char v[],ngx_http_binvalue bv[], int size)
 {
 	int i=0;
 	char *value,*bin;
 	value = strtok(v,",");
+	//extracts value first and put them in bv
 	while(value)
 	{
 		bv[i].is_str = (*value =='%')?true:false;
@@ -782,6 +828,7 @@ void ngx_http_as_utils_get_bin_value_pair(char b[], char v[],ngx_http_binvalue b
 	}
 	bin = strtok(b,",");
 	i=0;
+	//extracts bin first and put them in bv
 	while(bin)
 	{
 		ngx_http_as_utils_replace(bin, "%22", "");
